@@ -3,7 +3,7 @@
 Everything runs in **Google Colab**. The local copy is only used for writing and smoke-testing code.
 
 ## How to run
-1. Upload this folder to `MyDrive/InspectEdge`. Leave out `data/raw/` and `.venv/`; the notebooks download the data themselves.
+1. Open a notebook from `notebooks/` in Colab (File → Open notebook → GitHub → `moghbaie/InspectEdge_Mobile_VLM`). The setup cell clones this repo and downloads VisA itself; Drive (`MyDrive/InspectEdge`) only stores outputs.
 2. Open the notebooks in order from Drive with *Open with → Google Colaboratory*, using a GPU runtime:
 
 | Notebook | Purpose | Exit criterion |

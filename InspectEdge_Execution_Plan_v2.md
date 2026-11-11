@@ -1,7 +1,7 @@
 # InspectEdge: Execution Plan v2 (Colab, with tests and validation gates)
 
 **Date:** 2026-11-11 · **Builds on:** `InspectEdge_Mobile_VLM_FineTuning_Engineering_Plan.md` (v1.0)
-**Runtime:** everything runs in Google Colab (GPU runtime). Code lives on Drive at `MyDrive/InspectEdge`. Raw images are downloaded to the Colab local disk each session.
+**Runtime:** everything runs in Google Colab (GPU runtime). Code is cloned from GitHub each session; outputs (reports, manifests, checkpoints) persist on Drive at `MyDrive/InspectEdge`. Raw images are downloaded to the Colab local disk each session.
 **Status:** data audit is done and the code is smoke-tested locally on a 4 GB GTX 1650. All numbers marked *local smoke* must be re-measured in Colab (notebooks 01–04) before anyone relies on them.
 
 ---

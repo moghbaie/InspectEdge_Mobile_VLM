@@ -18,23 +18,31 @@ def code(s):
 SETUP = [
     md("""
 ## 0. Session setup (run every session)
-Upload the project folder (code, `configs/`, `data/manifests/`, `data/licenses/`; **not** `data/raw`, `.venv`) to
-`MyDrive/InspectEdge`. Runtime → Change runtime type → **GPU** (T4 is enough for 500M; L4/A100 for 3B).
+Code is cloned from GitHub (`moghbaie/InspectEdge_Mobile_VLM`); nothing needs to be uploaded.
+Google Drive (`MyDrive/InspectEdge`) only stores outputs: reports, manifests, checkpoints.
+Runtime → Change runtime type → **GPU** (T4 is enough for 500M; L4/A100 for 3B).
 """),
     code("""
 import os, json, subprocess
 from google.colab import drive
 drive.mount('/content/drive')
-DRIVE = '/content/drive/MyDrive/InspectEdge'   # persistent: code, manifests, reports, checkpoints
-WORK  = '/content/InspectEdge'                 # fast local disk: code copy + raw images
-os.makedirs(WORK, exist_ok=True)
-!rsync -a --exclude 'data/raw' --exclude '.venv' --exclude 'checkpoints' {DRIVE}/ {WORK}/
+REPO  = 'https://github.com/moghbaie/InspectEdge_Mobile_VLM.git'
+DRIVE = '/content/drive/MyDrive/InspectEdge'   # persistent outputs: reports, manifests, checkpoints
+WORK  = '/content/InspectEdge'                 # fast local disk: code + raw images
+os.makedirs(DRIVE, exist_ok=True)
+if os.path.isdir(f'{WORK}/.git'):
+    !git -C {WORK} pull -q --ff-only
+else:
+    !git clone -q {REPO} {WORK}
+assert os.path.exists(f'{WORK}/pyproject.toml'), 'clone failed: check REPO URL / repo visibility'
 %cd {WORK}
+!git log --oneline -1
 !pip -q install -r requirements-colab.txt
 !pip -q install -e . --no-deps
 os.environ['INSPECTEDGE_ROOT'] = WORK
 !nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
 import torch, transformers, peft
+assert transformers.__version__ == '4.57.1', 'pinned transformers not active: Runtime -> Restart session, then re-run this cell'
 print('torch', torch.__version__, 'cuda', torch.version.cuda, '| transformers', transformers.__version__, '| peft', peft.__version__)
 assert torch.cuda.is_available(), 'No GPU: Runtime -> Change runtime type -> GPU'
 """),
