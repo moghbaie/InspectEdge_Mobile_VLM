@@ -1,0 +1,173 @@
+{
+  "by_split_label": {
+    "anomaly": {
+      "test": 179,
+      "train": 841,
+      "val": 180
+    },
+    "normal": {
+      "test": 1443,
+      "train": 6735,
+      "val": 1443
+    }
+  },
+  "anomalies_by_category_split": {
+    "test": {
+      "candle": 14,
+      "capsules": 15,
+      "cashew": 15,
+      "chewinggum": 15,
+      "fryum": 15,
+      "macaroni1": 15,
+      "macaroni2": 15,
+      "pcb1": 15,
+      "pcb2": 15,
+      "pcb3": 15,
+      "pcb4": 15,
+      "pipe_fryum": 15
+    },
+    "train": {
+      "candle": 71,
+      "capsules": 70,
+      "cashew": 70,
+      "chewinggum": 70,
+      "fryum": 70,
+      "macaroni1": 70,
+      "macaroni2": 70,
+      "pcb1": 70,
+      "pcb2": 70,
+      "pcb3": 70,
+      "pcb4": 70,
+      "pipe_fryum": 70
+    },
+    "val": {
+      "candle": 15,
+      "capsules": 15,
+      "cashew": 15,
+      "chewinggum": 15,
+      "fryum": 15,
+      "macaroni1": 15,
+      "macaroni2": 15,
+      "pcb1": 15,
+      "pcb2": 15,
+      "pcb3": 15,
+      "pcb4": 15,
+      "pipe_fryum": 15
+    }
+  },
+  "primary_type_by_split": {
+    "test": {
+      "chip_or_missing_material": 30,
+      "contamination_or_spot": 33,
+      "crack": 9,
+      "deformation_or_dent": 32,
+      "discoloration": 19,
+      "foreign_object": 4,
+      "missing_or_misplaced_component": 22,
+      "scratch": 21,
+      "unknown": 9
+    },
+    "train": {
+      "chip_or_missing_material": 146,
+      "contamination_or_spot": 140,
+      "crack": 68,
+      "deformation_or_dent": 169,
+      "discoloration": 77,
+      "foreign_object": 8,
+      "missing_or_misplaced_component": 79,
+      "scratch": 105,
+      "unknown": 49
+    },
+    "val": {
+      "chip_or_missing_material": 18,
+      "contamination_or_spot": 38,
+      "crack": 8,
+      "deformation_or_dent": 42,
+      "discoloration": 21,
+      "foreign_object": 1,
+      "missing_or_misplaced_component": 12,
+      "scratch": 25,
+      "unknown": 15
+    }
+  },
+  "all_type_mentions": {
+    "chip_or_missing_material": 203,
+    "foreign_object": 17,
+    "contamination_or_spot": 308,
+    "deformation_or_dent": 274,
+    "unknown": 160,
+    "discoloration": 117,
+    "scratch": 276,
+    "crack": 116,
+    "missing_or_misplaced_component": 132
+  },
+  "mask_area_frac_pct": {
+    "p5": 0.00016,
+    "p25": 0.00073,
+    "p50": 0.00194,
+    "p75": 0.00451,
+    "p95": 0.02896
+  },
+  "boxes_per_anomaly": {
+    "count": 1200.0,
+    "mean": 2.28,
+    "std": 2.95,
+    "min": 1.0,
+    "25%": 1.0,
+    "50%": 1.0,
+    "75%": 2.0,
+    "max": 51.0
+  },
+  "image_size_px": {
+    "width": {
+      "candle": 1284,
+      "capsules": 1500,
+      "cashew": 1274,
+      "chewinggum": 1342,
+      "fryum": 1500,
+      "macaroni1": 1500,
+      "macaroni2": 1500,
+      "pcb1": 1404,
+      "pcb2": 1404,
+      "pcb3": 1562,
+      "pcb4": 1358,
+      "pipe_fryum": 1300
+    },
+    "height": {
+      "candle": 1168,
+      "capsules": 1000,
+      "cashew": 1176,
+      "chewinggum": 1118,
+      "fryum": 1000,
+      "macaroni1": 1000,
+      "macaroni2": 1000,
+      "pcb1": 1070,
+      "pcb2": 1070,
+      "pcb3": 960,
+      "pcb4": 1104,
+      "pipe_fryum": 1154
+    }
+  },
+  "sharpness_lap_var_pct": [
+    24.2,
+    209.0,
+    1488.8
+  ],
+  "mean_luma_pct": [
+    31.5,
+    91.7,
+    130.9
+  ],
+  "pcb_subset": {
+    "anomaly": {
+      "test": 60,
+      "train": 280,
+      "val": 60
+    },
+    "normal": {
+      "test": 602,
+      "train": 2812,
+      "val": 602
+    }
+  }
+}

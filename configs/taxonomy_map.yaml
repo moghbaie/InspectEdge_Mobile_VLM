@@ -1,0 +1,50 @@
+# VisA raw defect label -> InspectEdge closed taxonomy (schemas/report.py::DEFECT_TYPES)
+# Draft mapping by ML engineering; MUST be reviewed by an inspection domain expert (plan 3.3).
+# Ambiguous labels are mapped to "unknown" rather than forced into a class.
+dataset: visa_20220922
+mapping:
+  scratch: scratch
+  scratches: scratch
+  small scratches: scratch
+  small cracks: crack
+  middle breakage: crack
+  breakage down the middle: crack
+  chunk of wax missing: chip_or_missing_material
+  chunk of gum missing: chip_or_missing_material
+  corner missing: chip_or_missing_material
+  corner or edge breakage: chip_or_missing_material
+  corner and edge breakage: chip_or_missing_material
+  chip around edge and corner: chip_or_missing_material
+  small chip around edge: chip_or_missing_material
+  small holes: chip_or_missing_material
+  different colour spot: contamination_or_spot
+  different color spot: contamination_or_spot
+  same colour spot: contamination_or_spot
+  similar colour spot: contamination_or_spot
+  color spot similar to the object: contamination_or_spot
+  dirt: contamination_or_spot
+  leak: contamination_or_spot
+  extra wax in candle: contamination_or_spot
+  foreign particals on candle: foreign_object
+  burnt: discoloration
+  discolor: discoloration
+  bent: deformation_or_dent
+  misshape: deformation_or_dent
+  melt: deformation_or_dent
+  wax melded out of the candle: deformation_or_dent
+  damaged corner of packaging: deformation_or_dent
+  weird candle wick: deformation_or_dent
+  missing: missing_or_misplaced_component
+  wrong place: missing_or_misplaced_component
+  extra: missing_or_misplaced_component
+  bubble: unknown
+  stuck together: unknown
+  fryum stuck together: unknown
+  damage: unknown
+  other: unknown
+# Asset families used for the MVP subset (plan: "industrial parts"). Food categories are
+# kept for detector pre-training/robustness only, not as product claims.
+asset_family:
+  electronics_pcb: [pcb1, pcb2, pcb3, pcb4]
+  molded_consumable: [candle, capsules, chewinggum]
+  food: [cashew, fryum, macaroni1, macaroni2, pipe_fryum]

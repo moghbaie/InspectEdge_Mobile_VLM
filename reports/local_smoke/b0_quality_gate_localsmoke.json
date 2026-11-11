@@ -1,0 +1,12 @@
+{
+  "auroc": 0.8813,
+  "threshold_clean_reject5": 0.5781171004124237,
+  "detect_rate_by_family": {
+    "low_light": 0.88,
+    "defocus_blur": 0.98,
+    "motion_blur": 0.92,
+    "sensor_noise": 0.74,
+    "jpeg": 0.88,
+    "glare": 0.02
+  }
+}

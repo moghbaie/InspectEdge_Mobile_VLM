@@ -1,0 +1,14 @@
+{
+  "train": {
+    "n": 7576,
+    "sha256_of_ids": "3de0ef677a4806b20b0c2bfbb6a13b3052b053948789293413bb0a1ae485cba1"
+  },
+  "val": {
+    "n": 1623,
+    "sha256_of_ids": "9a5735c0bb610a28f712134feec905a12b9a7ac510ac66e3c2877c2644085c3f"
+  },
+  "test": {
+    "n": 1622,
+    "sha256_of_ids": "b2267be39ad119a87c155a2dd886fe54ce069c2872c373f37f23cd6deed381d6"
+  }
+}

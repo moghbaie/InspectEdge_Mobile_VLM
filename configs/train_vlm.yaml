@@ -1,0 +1,24 @@
+# Starting hypotheses (plan 5.4), not tuned values. Grid: lr {1e-4, 2e-4} x r {8, 16}; epochs 2-4.
+run_name: smolvlm500m_lora_r16_lr2e-4_s0
+model_id: HuggingFaceTB/SmolVLM-500M-Instruct
+method: lora            # lora | full (full only for <=500M if memory allows)
+freeze_vision: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+lr: 2.0e-4
+epochs: 3
+warmup_ratio: 0.04
+batch_size: 4           # T4 16GB @ longest_edge 1024; drop to 2 + grad_accum 8 on OOM
+grad_accum: 4
+grad_ckpt: true
+longest_edge: 1024
+aug_prob: 0.4           # training-only degradation (clean+degraded mix)
+normal_ratio: 2.0       # normals per anomaly in each epoch plan
+mismatch_frac: 0.05     # asset-mismatch -> unsupported_asset examples
+categories: null        # null = all 12 VisA categories; e.g. [pcb1, pcb2, pcb3, pcb4] for PCB-only MVP
+save_steps: 200
+seed: 0
+output_dir: checkpoints
+report_to: none         # or wandb

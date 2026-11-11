@@ -1,0 +1,17 @@
+# Environments / caches
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Raw datasets are downloaded and checksum-verified by the notebooks; never commit them
+data/raw/
+
+# Training outputs (written to Google Drive in Colab)
+checkpoints/
+*.safetensors
+*.pt
+*.pth
+*.bin

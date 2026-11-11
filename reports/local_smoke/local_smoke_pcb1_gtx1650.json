@@ -1,0 +1,90 @@
+{
+  "pcb1": {
+    "n_train": 904,
+    "n_test": 200,
+    "load_s": 10.326969861984253,
+    "fit_s": 266.8563323020935,
+    "bank_size": 7087,
+    "infer_ms_per_img": 51.034226417541504,
+    "image_auroc": 0.9613,
+    "image_auprc": 0.9589998165810454,
+    "image_f1_max": 0.9178743961352657,
+    "f1_max_threshold": 0.41008153557777405,
+    "prevalence": 0.5,
+    "n": 200,
+    "pixel_auroc": 0.995795829277285,
+    "aupro_0.3": 0.9115072652671313,
+    "op_val_threshold_recall85": {
+      "threshold": 0.4156964421272278,
+      "recall": 0.9571428571428572,
+      "precision": 0.9054054054054054,
+      "fpr": 0.1,
+      "fp_per_100_normals": 10.0
+    },
+    "robustness_sev3": {
+      "low_light": {
+        "image_auroc": 0.9166,
+        "auroc_drop": 0.04470000000000007,
+        "recall_at_clean_thr": 1.0,
+        "fpr_at_clean_thr": 1.0,
+        "relative_recall_drop": -0.04477611940298498
+      },
+      "defocus_blur": {
+        "image_auroc": 0.6228000000000001,
+        "auroc_drop": 0.3384999999999999,
+        "recall_at_clean_thr": 1.0,
+        "fpr_at_clean_thr": 1.0,
+        "relative_recall_drop": -0.04477611940298498
+      },
+      "motion_blur": {
+        "image_auroc": 0.5536,
+        "auroc_drop": 0.40770000000000006,
+        "recall_at_clean_thr": 1.0,
+        "fpr_at_clean_thr": 1.0,
+        "relative_recall_drop": -0.04477611940298498
+      },
+      "sensor_noise": {
+        "image_auroc": 0.772,
+        "auroc_drop": 0.18930000000000002,
+        "recall_at_clean_thr": 1.0,
+        "fpr_at_clean_thr": 1.0,
+        "relative_recall_drop": -0.04477611940298498
+      },
+      "jpeg": {
+        "image_auroc": 0.5726,
+        "auroc_drop": 0.38870000000000005,
+        "recall_at_clean_thr": 1.0,
+        "fpr_at_clean_thr": 1.0,
+        "relative_recall_drop": -0.04477611940298498
+      },
+      "glare": {
+        "image_auroc": 0.7153999999999999,
+        "auroc_drop": 0.24590000000000012,
+        "recall_at_clean_thr": 1.0,
+        "fpr_at_clean_thr": 0.9428571428571428,
+        "relative_recall_drop": -0.04477611940298498
+      },
+      "combined": {
+        "image_auroc": 0.646,
+        "auroc_drop": 0.3153,
+        "recall_at_clean_thr": 1.0,
+        "fpr_at_clean_thr": 1.0,
+        "relative_recall_drop": -0.04477611940298498
+      }
+    }
+  },
+  "_mean": {
+    "image_auroc": 0.9613,
+    "image_auprc": 0.9589998165810454,
+    "image_f1_max": 0.9178743961352657,
+    "pixel_auroc": 0.995795829277285,
+    "aupro_0.3": 0.9115072652671313
+  },
+  "_meta": {
+    "gpu": "NVIDIA GeForce GTX 1650 with Max-Q Design",
+    "torch": "2.5.1+cu124",
+    "coreset": 0.01,
+    "res": 256,
+    "crop": 224
+  }
+}
