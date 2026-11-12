@@ -99,9 +99,11 @@ def main():
         save_total_limit=4,
         fp16=fp16,
         bf16=not fp16,
+        tf32=cfg.get("tf32") or None,   # Ampere+ (A100/L4): TF32 matmuls for the fp32 LoRA params
         gradient_checkpointing=cfg.get("grad_ckpt", False),
         gradient_checkpointing_kwargs={"use_reentrant": False},
         dataloader_num_workers=cfg.get("workers", 2),
+        dataloader_persistent_workers=cfg.get("workers", 2) > 0,
         remove_unused_columns=False,
         report_to=cfg.get("report_to", "none"),
         seed=cfg["seed"],

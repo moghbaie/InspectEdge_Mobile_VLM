@@ -70,8 +70,19 @@ print('synced to', DRIVE)
 """)
 
 
-def nb(cells):
-    return {"cells": cells, "metadata": {"accelerator": "GPU", "colab": {"gpuType": "T4", "provenance": []},
+GPU_CHECK = code("""
+# Ampere+ GPU (A100 preferred; L4/H100 also fine). bf16 + TF32 need compute capability >= 8.0.
+gpu = torch.cuda.get_device_name(0); mem_gb = torch.cuda.get_device_properties(0).total_memory / 2**30
+assert torch.cuda.is_bf16_supported() and torch.cuda.get_device_capability(0)[0] >= 8, \\
+    f'{gpu} lacks bf16: Runtime -> Change runtime type -> A100 (or L4) GPU'
+torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
+print(gpu, f'{mem_gb:.0f} GB')
+""")
+A100_NBS = ("03_", "04_")
+
+
+def nb(cells, gpu="T4"):
+    return {"cells": cells, "metadata": {"accelerator": "GPU", "colab": {"gpuType": gpu, "provenance": []},
                                           "kernelspec": {"name": "python3", "display_name": "Python 3"},
                                           "language_info": {"name": "python"}},
             "nbformat": 4, "nbformat_minor": 0}
@@ -128,12 +139,22 @@ for m in ['HuggingFaceTB/SmolVLM-256M-Instruct', 'HuggingFaceTB/SmolVLM-500M-Ins
         SYNC,
     ],
     "03_vlm_finetune_colab.ipynb": [
-        md("# 03 · LoRA SFT of SmolVLM-500M\nOrder: smoke test → single run → small grid. Checkpoints are written straight to Drive so a disconnect only loses minutes (re-run with `--resume`)."),
+        md("# 03 · LoRA SFT of SmolVLM-500M (A100)\nOrder: smoke test → single run → small grid. Checkpoints are written straight to Drive so a disconnect only loses minutes (re-run with `--resume`).\nRuntime → Change runtime type → **A100 GPU** (L4 also works; batch settings adapt to GPU memory)."),
         *SETUP,
+        GPU_CHECK,
+        code("""
+# Memory-sized overrides. Effective batch stays 16 (= T4 config 4x4) so lr/warmup in configs/train_vlm.yaml remain valid.
+if mem_gb > 60:   BS, CKPT_ = 16, False   # A100/H100 80GB
+elif mem_gb > 30: BS, CKPT_ = 8, False    # A100 40GB
+else:             BS, CKPT_ = 8, True     # L4 24GB
+GPU_SET = f'batch_size={BS} grad_accum={16 // BS} grad_ckpt={str(CKPT_).lower()} workers={min(8, os.cpu_count())} tf32=true'
+print(GPU_SET)
+"""),
         md("## 1. Training tests: one-batch overfit smoke test (must print SMOKE TEST PASSED)"),
-        code("!python scripts/train_vlm_lora.py --smoke --set output_dir={DRIVE}/checkpoints 2>&1 | grep -vE 'Warning|warn' | tail -15"),
-        md("## 2. Main run (T4 ≈ 1–1.5 h at longest_edge 1024; reduce `batch_size` on OOM)"),
-        code("!python scripts/train_vlm_lora.py --resume --set output_dir={DRIVE}/checkpoints 2>&1 | grep -vE 'Warning|warn' | tail -30"),
+        code("!python scripts/train_vlm_lora.py --smoke --set output_dir={DRIVE}/checkpoints {GPU_SET} 2>&1 | grep -vE 'Warning|warn' | tail -15"),
+        md("## 2. Main run (bf16; on OOM append `grad_ckpt=true`, or halve `batch_size` and double `grad_accum`)"),
+        code("!python scripts/train_vlm_lora.py --resume --set output_dir={DRIVE}/checkpoints {GPU_SET} 2>&1 | grep -vE 'Warning|warn' | tail -30"),
+        code("!nvidia-smi --query-gpu=memory.used,memory.total --format=csv"),
         code("""
 meta = json.load(open(f'{DRIVE}/checkpoints/smolvlm500m_lora_r16_lr2e-4_s0/run_meta.json'))
 import matplotlib.pyplot as plt; plt.plot(meta['losses']); plt.title('train loss'); plt.show()
@@ -144,14 +165,15 @@ print(meta['gpu'], round(meta['train_seconds']/60,1), 'min')
 GRID = [(1e-4, 8), (1e-4, 16), (2e-4, 8)]   # (2e-4,16) is the main run above
 for lr, r in GRID:
     name = f'smolvlm500m_lora_r{r}_lr{lr:g}_s0'
-    !python scripts/train_vlm_lora.py --resume --set output_dir={DRIVE}/checkpoints run_name={name} lr={lr} lora_r={r} lora_alpha={2*r} 2>&1 | tail -3
+    !python scripts/train_vlm_lora.py --resume --set output_dir={DRIVE}/checkpoints {GPU_SET} run_name={name} lr={lr} lora_r={r} lora_alpha={2*r} 2>&1 | tail -3
 """),
-        md("## 4. Ablations (plan 5.5) — same eval harness in notebook 04\n- clean-only: `--set aug_prob=0.0 run_name=..._cleanonly`\n- no abstention/mismatch: `--set mismatch_frac=0.0`\n- PCB-only MVP: `--set categories=[pcb1,pcb2,pcb3,pcb4]`\n- second seed for finalists: `--set seed=1 run_name=..._s1`"),
+        md("## 4. Ablations (plan 5.5) — same eval harness in notebook 04; always keep `{GPU_SET}` in `--set`\n- clean-only: `--set aug_prob=0.0 run_name=..._cleanonly`\n- no abstention/mismatch: `--set mismatch_frac=0.0`\n- PCB-only MVP: `--set categories=[pcb1,pcb2,pcb3,pcb4]`\n- second seed for finalists: `--set seed=1 run_name=..._s1`"),
         SYNC,
     ],
     "04_evaluation_colab.ipynb": [
-        md("# 04 · Validation selection → locked test → robustness → gates\n**Rule:** choose checkpoint + thresholds on val only. Write the chosen run name into `reports/preregistration.json` *before* any `--split test` call."),
+        md("# 04 · Validation selection → locked test → robustness → gates (A100)\n**Rule:** choose checkpoint + thresholds on val only. Write the chosen run name into `reports/preregistration.json` *before* any `--split test` call.\nRuntime → Change runtime type → **A100 GPU** (L4 also works). Note: `latency_p95_s` measured here is server-GPU latency, not on-device; compare systems only when run on the same GPU type."),
         *SETUP,
+        GPU_CHECK,
         code("CKPT = f'{DRIVE}/checkpoints'\n!ls {CKPT}"),
         md("## 1. Validation selection (full val split)"),
         code("""
@@ -197,5 +219,6 @@ for fam in ['low_light','defocus_blur','motion_blur','sensor_noise','jpeg','glar
 if __name__ == "__main__":
     (ROOT / "notebooks").mkdir(exist_ok=True)
     for name, cells in NB.items():
-        (ROOT / "notebooks" / name).write_text(json.dumps(nb(cells), indent=1))
+        gpu = "A100" if name.startswith(A100_NBS) else "T4"
+        (ROOT / "notebooks" / name).write_text(json.dumps(nb(cells, gpu), indent=1))
         print("wrote", name, len(cells), "cells")
