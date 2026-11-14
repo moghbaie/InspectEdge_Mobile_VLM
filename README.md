@@ -12,6 +12,7 @@ Everything runs in **Google Colab**. The local copy is only used for writing and
 | `notebooks/02_baselines_colab.ipynb` | B1 PatchCore (+robustness), B3 detector+template report, B2 zero-shot SmolVLM | baseline table in `reports/` |
 | `notebooks/03_vlm_finetune_colab.ipynb` | smoke overfit test, LoRA SFT, grid, ablations | smoke passes, checkpoints on Drive |
 | `notebooks/04_evaluation_colab.ipynb` | val selection, pre-registration, locked test, robustness, gates, human review sheet | `reports/comparison_test.md` |
+| `notebooks/05_gemma3n_finetune_colab.ipynb` | Gemma 3n E2B challenger: zero-shot ref, smoke test, LoRA SFT, full-val eval, val comparison vs SmolVLM (needs `HF_TOKEN` + accepted Gemma terms) | val comparison table; feed winner into notebook 04 pre-registration |
 
 See `InspectEdge_Execution_Plan_v2.md` for the step-by-step plan with tests and validation gates.
 

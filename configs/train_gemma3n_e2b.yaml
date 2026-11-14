@@ -1,0 +1,26 @@
+# Gemma 3n E2B challenger. Same data, schema, augmentation and optimiser settings as configs/train_vlm.yaml
+# so the comparison with SmolVLM-500M isolates the base model. Gated on HF: accept the Gemma terms first.
+run_name: gemma3n_e2b_lora_r16_lr2e-4_s0
+model_id: google/gemma-3n-E2B-it
+method: lora
+freeze_vision: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+# Regex (PEFT full-match): language model only. Gemma 3n's audio tower also has q/k/v_proj layers.
+lora_targets: '.*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)'
+lr: 2.0e-4
+epochs: 3
+warmup_ratio: 0.04
+batch_size: 4           # overridden per GPU in notebook 05
+grad_accum: 4
+grad_ckpt: true
+longest_edge: 1024      # load/augment at the same resolution as SmolVLM; the Gemma processor then resizes to 768x768
+aug_prob: 0.4
+normal_ratio: 2.0
+mismatch_frac: 0.05
+categories: null
+save_steps: 200
+seed: 0
+output_dir: checkpoints
+report_to: none

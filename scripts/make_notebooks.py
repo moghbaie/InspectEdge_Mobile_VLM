@@ -86,11 +86,11 @@ assert torch.cuda.is_bf16_supported() and torch.cuda.get_device_capability(0)[0]
 torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
 print(gpu, f'{mem_gb:.0f} GB')
 """)
-A100_NBS = ("03_", "04_")
+A100_NBS = ("03_", "04_", "05_")
+
 # Colab wipes /content (images, local reports/) and the Python state on a runtime reset.
 GUARD = ("import os\nassert os.path.exists('/content/InspectEdge/data/raw/visa/.complete') and os.getcwd() == '/content/InspectEdge', "
          "'Runtime was reset: re-run every cell from section 0 (setup) first'\n")
-
 
 
 def nb(cells, gpu="T4"):
@@ -249,11 +249,74 @@ for fam in ['low_light','defocus_blur','motion_blur','sensor_noise','jpeg','glar
         md("## 4. Human grounding review\nDownload `reports/human_review_test.csv`, have two raters fill it blind, adjudicate disagreements, then compute the unsupported-assertion rate (gate ≤ 2%)."),
         SYNC,
     ],
+    "05_gemma3n_finetune_colab.ipynb": [
+        md("# 05 · Gemma 3n E2B challenger: LoRA SFT + val comparison (A100)\nSame data, prompt, schema, augmentation and optimiser settings as the SmolVLM-500M runs (`configs/train_gemma3n_e2b.yaml`), so differences come from the base model.\n**Val only.** This notebook never touches `--split test`. If Gemma wins on val, update `reports/preregistration.json` (notebook 04) *before* the locked test.\nRuntime → Change runtime type → **A100 GPU** (L4 works with smaller batches + gradient checkpointing)."),
+        *SETUP,
+        GPU_CHECK,
+        md("## Hugging Face access (Gemma is gated)\n1. Accept the Gemma terms at https://huggingface.co/google/gemma-3n-E2B-it.\n2. Add a read token as a Colab secret named `HF_TOKEN` (🔑 icon in the left sidebar) and enable notebook access."),
+        code("""
+from google.colab import userdata
+os.environ['HF_TOKEN'] = userdata.get('HF_TOKEN')
+!pip -q install "timm>=1.0.16"   # Gemma 3n vision tower (MobileNet-V5) is a timm model
+from huggingface_hub import hf_hub_download
+MODEL = 'google/gemma-3n-E2B-it'
+hf_hub_download(MODEL, 'config.json')   # fails here if the license is not accepted / token missing
+print('access OK:', MODEL)
+"""),
+        code("""
+# Memory-sized overrides; effective batch stays 16 so lr/warmup match the SmolVLM runs.
+# Gemma 3n is ~5B raw params with a 262k vocab (large logits), so batches are smaller than SmolVLM's.
+if mem_gb > 60:   BS, CKPT_ = 8, False   # A100/H100 80GB
+elif mem_gb > 30: BS, CKPT_ = 4, True    # A100 40GB
+else:             BS, CKPT_ = 2, True    # L4 24GB
+GPU_SET = f'batch_size={BS} grad_accum={16 // BS} grad_ckpt={str(CKPT_).lower()} workers={min(8, os.cpu_count())} tf32=true'
+CFG = 'configs/train_gemma3n_e2b.yaml'
+RUN = 'gemma3n_e2b_lora_r16_lr2e-4_s0'
+CKPT = f'{DRIVE}/checkpoints'
+print(GPU_SET)
+"""),
+        md("## 1. Zero-shot B2 reference (same 10-per-cell val sample as the SmolVLM B2 baseline)"),
+        code("!python scripts/eval_vlm.py --model {MODEL} --split val --per-cell 10 2>&1 | grep -vE 'Warning|warn' | tail -25"),
+        md("## 2. One-batch overfit smoke test (must print SMOKE TEST PASSED)\nWritten to `checkpoints/smoke` (shared with notebook 03; it is only a pass/fail check)."),
+        code("!python scripts/train_vlm_lora.py --config {CFG} --smoke --set output_dir={CKPT} {GPU_SET} 2>&1 | grep -vE 'Warning|warn' | tail -15"),
+        md("## 3. Main run (resumable: re-run this cell after a disconnect; on OOM halve `batch_size`, double `grad_accum`, set `grad_ckpt=true`)"),
+        code("!python scripts/train_vlm_lora.py --config {CFG} --resume --set output_dir={CKPT} {GPU_SET} 2>&1 | grep -vE 'Warning|warn' | tail -30"),
+        code("!nvidia-smi --query-gpu=memory.used,memory.total --format=csv"),
+        code("""
+meta = json.load(open(f'{CKPT}/{RUN}/run_meta.json'))
+import matplotlib.pyplot as plt; plt.plot(meta['losses']); plt.title(f'{RUN} train loss'); plt.show()
+print(meta['gpu'], round(meta['train_seconds']/60,1), 'min')
+"""),
+        md("## 4. Full-val evaluation of the fine-tuned adapter"),
+        code("!python scripts/eval_vlm.py --model {MODEL} --adapter {CKPT}/{RUN}/final --split val --per-cell 0 --tag {RUN} 2>&1 | grep -vE 'Warning|warn' | tail -22"),
+        md("## 5. Val comparison with the SmolVLM runs (metrics from this session + those synced to Drive by notebook 04)"),
+        code("""
+import glob, pandas as pd
+KEYS = ['schema_valid_rate','status_acc_strict','anomaly_balanced_acc','anomaly_recall_flagged','false_reassurance_rate',
+        'unsupported_finding_rate_on_normals','defect_type_macro_f1','region_iou>=0.3_rate','latency_p50_s','latency_p95_s','peak_gpu_mem_gb']
+rows = {}
+for f in sorted(glob.glob(f'{DRIVE}/reports/vlm_eval/*_val_metrics.json')) + sorted(glob.glob('reports/vlm_eval/*_val_metrics.json')):
+    m = json.load(open(f))
+    if m.get('corrupt'): continue
+    rows[os.path.basename(f).replace('_val_metrics.json', '')] = {k: m.get(k) for k in KEYS}   # local (newer) wins
+df = pd.DataFrame(rows).T.sort_values('status_acc_strict', ascending=False)
+gates = {'schema_valid_rate': ('>=', .995), 'anomaly_recall_flagged': ('>=', .85),
+         'unsupported_finding_rate_on_normals': ('<=', .10), 'false_reassurance_rate': ('<=', .15)}
+df['gates_pass'] = df.apply(lambda r: all((r[k] >= t) if op == '>=' else (r[k] <= t) for k, (op, t) in gates.items()), axis=1)
+df.round(3)
+"""),
+        md("Zero-shot rows (no `lora` in the name) use a 10-per-cell sample, fine-tuned rows the full val split, so compare fine-tuned rows with each other. Latency is server-GPU latency; compare only rows measured on the same GPU type."),
+        SYNC,
+    ],
 }
 
 if __name__ == "__main__":
+    import sys
+    only = sys.argv[1:]   # e.g. `python scripts/make_notebooks.py 05` writes only notebooks whose name starts with 05
     (ROOT / "notebooks").mkdir(exist_ok=True)
     for name, cells in NB.items():
+        if only and not name.startswith(tuple(only)):
+            continue
         gpu = "A100" if name.startswith(A100_NBS) else "T4"
         (ROOT / "notebooks" / name).write_text(json.dumps(nb(cells, gpu), indent=1))
         print("wrote", name, len(cells), "cells")

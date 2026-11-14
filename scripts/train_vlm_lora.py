@@ -63,7 +63,8 @@ def main():
     ds = SFTDataset(items, cfg["longest_edge"], 0.0 if a.smoke else cfg["aug_prob"], cfg["seed"])
 
     proc = AutoProcessor.from_pretrained(cfg["model_id"])
-    proc.image_processor.size = {"longest_edge": cfg["longest_edge"]}
+    if "longest_edge" in getattr(proc.image_processor, "size", {}):  # Idefics3/SmolVLM; Gemma 3n is fixed 768x768
+        proc.image_processor.size = {"longest_edge": cfg["longest_edge"]}
     fp16 = torch.cuda.is_available() and not torch.cuda.is_bf16_supported()
     dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
     model = AutoModelForImageTextToText.from_pretrained(cfg["model_id"], dtype=dtype).to("cuda")
