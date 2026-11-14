@@ -49,12 +49,20 @@ assert torch.cuda.is_available(), 'No GPU: Runtime -> Change runtime type -> GPU
     code(f"""
 # Data: official VisA release (CC BY 4.0). Verified by SHA-256 before use.
 VISA_SHA = '{VISA_SHA}'
-if not os.path.exists('data/raw/visa/pcb1'):
+import pandas as pd
+def visa_missing():   # every manifest image/mask must be on local disk (a runtime reset or partial extract loses them)
+    man = pd.read_json('data/manifests/visa_manifest.jsonl', lines=True)
+    return [p for p in list(man.image_path) + [m for m in man.mask_path if m] if not os.path.exists(p)]
+if visa_missing():
+    !rm -rf data/raw/visa data/raw/_dl
     os.makedirs('data/raw/_dl', exist_ok=True); os.makedirs('data/raw/visa', exist_ok=True)
     !wget -q -O data/raw/_dl/VisA_20220922.tar {VISA_URL}
     h = subprocess.run(['sha256sum', 'data/raw/_dl/VisA_20220922.tar'], capture_output=True, text=True).stdout.split()[0]
     assert h == VISA_SHA, f'VisA archive checksum mismatch: {{h}}'
     !tar -xf data/raw/_dl/VisA_20220922.tar -C data/raw/visa && rm data/raw/_dl/VisA_20220922.tar
+_miss = visa_missing()
+assert not _miss, f'{{len(_miss)}} VisA files missing after extraction (disk full?), e.g. {{_miss[0]}}'
+open('data/raw/visa/.complete', 'w').close()
 !ls data/raw/visa
 """),
     code("""
@@ -79,6 +87,10 @@ torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = 
 print(gpu, f'{mem_gb:.0f} GB')
 """)
 A100_NBS = ("03_", "04_")
+# Colab wipes /content (images, local reports/) and the Python state on a runtime reset.
+GUARD = ("import os\nassert os.path.exists('/content/InspectEdge/data/raw/visa/.complete') and os.getcwd() == '/content/InspectEdge', "
+         "'Runtime was reset: re-run every cell from section 0 (setup) first'\n")
+
 
 
 def nb(cells, gpu="T4"):
@@ -174,20 +186,31 @@ for lr, r in GRID:
         md("# 04 · Validation selection → locked test → robustness → gates (A100)\n**Rule:** choose checkpoint + thresholds on val only. Write the chosen run name into `reports/preregistration.json` *before* any `--split test` call.\nRuntime → Change runtime type → **A100 GPU** (L4 also works). Note: `latency_p95_s` measured here is server-GPU latency, not on-device; compare systems only when run on the same GPU type."),
         *SETUP,
         GPU_CHECK,
-        code("CKPT = f'{DRIVE}/checkpoints'\n!ls {CKPT}"),
-        md("## 1. Validation selection (full val split)"),
         code("""
+CKPT = f'{DRIVE}/checkpoints'
+!ls {CKPT}
+# Restore earlier outputs (B3 frozen val thresholds from notebook 02, val metrics) that a runtime reset wiped from local disk.
+!mkdir -p reports && rsync -a --update {DRIVE}/reports/ reports/ 2>/dev/null; ls reports
+"""),
+        md("## 1. Validation selection (full val split)"),
+        code(GUARD + """
 RUNS = ['smolvlm500m_lora_r16_lr2e-4_s0']   # add grid runs
 for run in RUNS:
+    assert os.path.isdir(f'{CKPT}/{run}/final'), f'no adapter at {CKPT}/{run}/final'
     !python scripts/eval_vlm.py --model HuggingFaceTB/SmolVLM-500M-Instruct --adapter {CKPT}/{run}/final --split val --per-cell 0 --tag {run} 2>&1 | tail -22
+    assert os.path.exists(f'reports/vlm_eval/{run}_val_metrics.json'), f'val eval of {run} failed: see the log above'
+!rsync -aR reports {DRIVE}/
 """),
         code("""
 import glob, pandas as pd
+KEYS = ['schema_valid_rate','status_acc_strict','anomaly_balanced_acc','anomaly_recall_flagged','false_reassurance_rate',
+        'unsupported_finding_rate_on_normals','defect_type_macro_f1','region_iou>=0.3_rate','latency_p95_s']
 rows = {}
-for f in glob.glob('reports/vlm_eval/*_val_metrics.json'):
-    m = json.load(open(f)); rows[f.split('/')[-1].replace('_val_metrics.json','')] = {k: m.get(k) for k in
-        ['schema_valid_rate','status_acc_strict','anomaly_balanced_acc','anomaly_recall_flagged','false_reassurance_rate',
-         'unsupported_finding_rate_on_normals','defect_type_macro_f1','region_iou>=0.3_rate','latency_p95_s']}
+for f in sorted(glob.glob(f'{DRIVE}/reports/vlm_eval/*_val_metrics.json')) + sorted(glob.glob('reports/vlm_eval/*_val_metrics.json')):
+    m = json.load(open(f))
+    if m.get('corrupt'): continue
+    rows[os.path.basename(f).replace('_val_metrics.json', '')] = {k: m.get(k) for k in KEYS}   # local (newer) wins
+assert rows, 'no val metrics found locally or on Drive: run the cell above first'
 pd.DataFrame(rows).T.sort_values('status_acc_strict', ascending=False).round(3)
 """),
         md("Selection rule (pre-registered): among runs with schema_valid ≥ 0.995 and unsupported_finding_rate_on_normals ≤ 0.10 on val, pick max status_acc_strict (invalid report = wrong); ties → lower false_reassurance."),
@@ -199,17 +222,29 @@ os.makedirs('reports', exist_ok=True); json.dump(prereg, open('reports/preregist
 !rsync -aR reports {DRIVE}/
 """),
         md("## 2. Locked test — run ONCE"),
-        code("""
-assert os.path.exists('reports/preregistration.json')
+        code(GUARD + """
+assert os.path.exists('reports/preregistration.json'), 'run the pre-registration cell above first'
+# B3 test reuses thresholds frozen on val (normally by notebook 02); freeze them here if they were never synced to Drive.
+if not os.path.exists('reports/b3_detector_report/frozen_thresholds.json'):
+    !python scripts/b3_detector_report.py --split val 2>&1 | tail -5
 !python scripts/b3_detector_report.py --split test 2>&1 | tail -5
 !python scripts/eval_vlm.py --model HuggingFaceTB/SmolVLM-500M-Instruct --split test --per-cell 0 2>&1 | tail -5
 !python scripts/eval_vlm.py --model HuggingFaceTB/SmolVLM-500M-Instruct --adapter {CKPT}/{FINAL}/final --split test --per-cell 0 --tag {FINAL} 2>&1 | tail -5
+SYSTEMS = {'B3': 'reports/b3_detector_report/test_predictions.jsonl',
+           'B2': 'reports/vlm_eval/SmolVLM-500M-Instruct_test_metrics.json',
+           'FT': f'reports/vlm_eval/{FINAL}_test_metrics.json'}
+failed = [k for k, p in SYSTEMS.items() if not os.path.exists(p)]
+assert not failed, f'test run failed for {failed}: see the logs above'
+!rsync -aR reports {DRIVE}/
 !python scripts/compare_and_gate.py --split test --system B3=reports/b3_detector_report/test_predictions.jsonl --system B2=reports/vlm_eval/SmolVLM-500M-Instruct_test_predictions.jsonl --system FT=reports/vlm_eval/{FINAL}_test_predictions.jsonl
+!rsync -aR reports {DRIVE}/
 """),
         md("## 3. Robustness suite on held-out test originals (report each family separately)"),
-        code("""
+        code(GUARD + """
 for fam in ['low_light','defocus_blur','motion_blur','sensor_noise','jpeg','glare','combined']:
     !python scripts/eval_vlm.py --model HuggingFaceTB/SmolVLM-500M-Instruct --adapter {CKPT}/{FINAL}/final --split test --per-cell 5 --corrupt {fam} --severity 3 --tag {FINAL} 2>&1 | tail -22
+    assert os.path.exists(f'reports/vlm_eval/{FINAL}_test_{fam}3_metrics.json'), f'robustness eval {fam} failed: see the log above'
+!rsync -aR reports {DRIVE}/
 """),
         md("## 4. Human grounding review\nDownload `reports/human_review_test.csv`, have two raters fill it blind, adjudicate disagreements, then compute the unsupported-assertion rate (gate ≤ 2%)."),
         SYNC,
