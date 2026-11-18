@@ -4,12 +4,18 @@ B2 baseline : python scripts/eval_vlm.py --model HuggingFaceTB/SmolVLM-500M-Inst
 Fine-tuned  : python scripts/eval_vlm.py --model HuggingFaceTB/SmolVLM-500M-Instruct --adapter checkpoints/<run>/final --split val
 Robustness  : add --corrupt low_light --severity 3
 Locked test : --split test  (run ONCE per finalist, after checkpoint/threshold selection on val)
+Long runs   : add --resume --out-dir /content/drive/MyDrive/InspectEdge/reports/vlm_eval [--max-items 300]
+              predictions are appended + fsynced per image, so a crash/disconnect loses at most one image;
+              re-run the same command to continue. Metrics are written only once every image is predicted.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -46,6 +52,9 @@ def main():
     ap.add_argument("--severity", type=int, default=3)
     ap.add_argument("--tag", default=None)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out-dir", default=None, help="default: reports/vlm_eval (use a Drive path on Colab)")
+    ap.add_argument("--resume", action="store_true", help="skip images already in <tag>_predictions.jsonl")
+    ap.add_argument("--max-items", type=int, default=0, help="predict at most N new images this call, then exit (0 = all)")
     a = ap.parse_args()
 
     man = pd.read_json(ROOT / "data/manifests/visa_manifest.jsonl", lines=True)
@@ -53,6 +62,31 @@ def main():
     if a.categories:
         df = df[df.category.isin(a.categories)]
     sample = select(df, a.per_cell, a.seed)
+
+    tag = a.tag or (a.model.split("/")[-1] + ("+" + a.adapter.strip("/").split("/")[-2] if a.adapter else ""))
+    tag += f"_{a.split}" + (f"_{a.corrupt}{a.severity}" if a.corrupt else "")
+    out_dir = Path(a.out_dir) if a.out_dir else ROOT / "reports/vlm_eval"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pred_path = out_dir / f"{tag}_predictions.jsonl"
+
+    # Resume: keep every fully written row (a crash mid-write leaves at most one truncated last line).
+    rows = []
+    if a.resume and pred_path.exists():
+        wanted, seen = set(sample.image_id), set()
+        for line in pred_path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("image_id") in wanted and row["image_id"] not in seen:
+                seen.add(row["image_id"])
+                rows.append(row)
+        pred_path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    done = {r["image_id"] for r in rows}
+    todo = sample[~sample.image_id.isin(done)]
+    if a.max_items > 0:
+        todo = todo.iloc[:a.max_items]
+    print(f"{tag}: {len(done)}/{len(sample)} already predicted, {len(todo)} to run this call -> {pred_path}", flush=True)
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if dev == "cuda" and torch.cuda.is_bf16_supported() else (torch.float16 if dev == "cuda" else torch.float32)
@@ -72,14 +106,8 @@ def main():
         model = PeftModel.from_pretrained(model, str(ROOT / a.adapter) if not a.adapter.startswith("/") else a.adapter)
     model.eval()
 
-    tag = a.tag or (a.model.split("/")[-1] + ("+" + a.adapter.strip("/").split("/")[-2] if a.adapter else ""))
-    tag += f"_{a.split}" + (f"_{a.corrupt}{a.severity}" if a.corrupt else "")
-    out_dir = ROOT / "reports/vlm_eval"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    rows, lat = [], []
-    with open(out_dir / f"{tag}_predictions.jsonl", "w", encoding="utf-8") as fo:
-        for k, r in sample.iterrows():
+    with open(pred_path, "a" if a.resume else "w", encoding="utf-8") as fo:
+        for n, (k, r) in enumerate(todo.iterrows()):
             arr, _ = load_image(r.to_dict(), a.longest_edge)
             if a.corrupt:
                 arr = corrupt(arr, a.corrupt, a.severity, seed=10_000 + k)[0]
@@ -95,7 +123,7 @@ def main():
                 out = model.generate(**inputs, max_new_tokens=a.max_new_tokens, do_sample=False)
             if dev == "cuda":
                 torch.cuda.synchronize()
-            lat.append(time.perf_counter() - t0)
+            dt = time.perf_counter() - t0
             text = proc.batch_decode(out[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
             pr = parse_model_output(text)
             p = pr.parsed if pr.json_ok else {}
@@ -108,11 +136,20 @@ def main():
                        json_ok=pr.json_ok, schema_ok=pr.schema_ok,
                        pred_status=p.get("inspection_status") if pr.json_ok else None,
                        pred_types=[f.get("type") for f in finds], pred_boxes=boxes,
-                       errors=pr.errors[:3], raw=text[:1000], latency_s=lat[-1])
+                       errors=pr.errors[:3], raw=text[:1000], latency_s=dt)
             rows.append(row)
             fo.write(json.dumps(row) + "\n")
-            if k % 10 == 0:
-                print(f"[{k + 1}/{len(sample)}] json={pr.json_ok} schema={pr.schema_ok} status={row['pred_status']} {lat[-1]:.2f}s", flush=True)
+            fo.flush()
+            os.fsync(fo.fileno())   # checkpoint per image: survives a runtime reset when out_dir is on Drive
+            if n % 10 == 0:
+                print(f"[{len(rows)}/{len(sample)}] json={pr.json_ok} schema={pr.schema_ok} status={row['pred_status']} {dt:.2f}s", flush=True)
+
+    if len(rows) < len(sample):
+        print(f"PARTIAL: {len(rows)}/{len(sample)} predicted. Re-run the same command with --resume to continue.", flush=True)
+        sys.exit(0)
+    order = {iid: i for i, iid in enumerate(sample.image_id)}
+    rows.sort(key=lambda x: order[x["image_id"]])
+    lat = [x["latency_s"] for x in rows]
 
     m = report_metrics(rows)
     for key in ["false_reassurance_rate", "unsupported_finding_rate_on_normals", "schema_valid_rate"]:
