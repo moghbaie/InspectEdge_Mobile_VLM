@@ -4,6 +4,8 @@ B2 baseline : python scripts/eval_vlm.py --model HuggingFaceTB/SmolVLM-500M-Inst
 Fine-tuned  : python scripts/eval_vlm.py --model HuggingFaceTB/SmolVLM-500M-Instruct --adapter checkpoints/<run>/final --split val
 Robustness  : add --corrupt low_light --severity 3
 Locked test : --split test  (run ONCE per finalist, after checkpoint/threshold selection on val)
+Faster      : add --batch-size 8 (batched greedy generation; latency is then re-measured
+              unbatched on --latency-samples images so it stays comparable with batch-1 runs)
 Long runs   : add --resume --out-dir /content/drive/MyDrive/InspectEdge/reports/vlm_eval [--max-items 300]
               predictions are appended + fsynced per image, so a crash/disconnect loses at most one image;
               re-run the same command to continue. Metrics are written only once every image is predicted.
@@ -55,6 +57,8 @@ def main():
     ap.add_argument("--out-dir", default=None, help="default: reports/vlm_eval (use a Drive path on Colab)")
     ap.add_argument("--resume", action="store_true", help="skip images already in <tag>_predictions.jsonl")
     ap.add_argument("--max-items", type=int, default=0, help="predict at most N new images this call, then exit (0 = all)")
+    ap.add_argument("--batch-size", type=int, default=1, help="images per generate() call (halved automatically on OOM)")
+    ap.add_argument("--latency-samples", type=int, default=30, help="batch>1 only: unbatched images timed for latency_p50/p95")
     a = ap.parse_args()
 
     man = pd.read_json(ROOT / "data/manifests/visa_manifest.jsonl", lines=True)
@@ -106,50 +110,90 @@ def main():
         model = PeftModel.from_pretrained(model, str(ROOT / a.adapter) if not a.adapter.startswith("/") else a.adapter)
     model.eval()
 
-    with open(pred_path, "a" if a.resume else "w", encoding="utf-8") as fo:
-        for n, (k, r) in enumerate(todo.iterrows()):
+    if getattr(proc, "tokenizer", None) is not None:
+        proc.tokenizer.padding_side = "left"   # batched generation with a decoder-only LM needs left padding
+
+    def generate(items):
+        """items: list of (k, row). Returns (decoded texts, wall seconds for the whole batch)."""
+        imgs, prompts = [], []
+        for k, r in items:
             arr, _ = load_image(r.to_dict(), a.longest_edge)
             if a.corrupt:
                 arr = corrupt(arr, a.corrupt, a.severity, seed=10_000 + k)[0]
-            img = Image.fromarray(arr)
-            prompt = proc.apply_chat_template(build_messages(r.category), add_generation_prompt=True)
-            inputs = proc(text=prompt, images=[img], return_tensors="pt").to(model.device)
-            if "pixel_values" in inputs:
-                inputs["pixel_values"] = inputs["pixel_values"].to(dtype)
-            if dev == "cuda":
-                torch.cuda.synchronize()
-            t0 = time.perf_counter()
-            with torch.no_grad():
-                out = model.generate(**inputs, max_new_tokens=a.max_new_tokens, do_sample=False)
-            if dev == "cuda":
-                torch.cuda.synchronize()
-            dt = time.perf_counter() - t0
-            text = proc.batch_decode(out[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
-            pr = parse_model_output(text)
-            p = pr.parsed if pr.json_ok else {}
-            finds = [f for f in (p.get("findings") or []) if isinstance(f, dict)] if isinstance(p.get("findings"), list) else []
-            boxes = [f["region_xyxy_normalized"] for f in finds
-                     if isinstance(f.get("region_xyxy_normalized"), list) and len(f["region_xyxy_normalized"]) == 4
-                     and all(isinstance(v, (int, float)) for v in f["region_xyxy_normalized"])]
-            row = dict(image_id=r.image_id, group_id=r.group_id, category=r.category,
-                       gt_anomaly=r.label == "anomaly", gt_types=list(r.defect_types), gt_boxes=list(r.boxes),
-                       json_ok=pr.json_ok, schema_ok=pr.schema_ok,
-                       pred_status=p.get("inspection_status") if pr.json_ok else None,
-                       pred_types=[f.get("type") for f in finds], pred_boxes=boxes,
-                       errors=pr.errors[:3], raw=text[:1000], latency_s=dt)
-            rows.append(row)
-            fo.write(json.dumps(row) + "\n")
+            imgs.append([Image.fromarray(arr)])
+            prompts.append(proc.apply_chat_template(build_messages(r.category), add_generation_prompt=True))
+        inputs = proc(text=prompts, images=imgs, padding=True, return_tensors="pt").to(model.device)
+        if "pixel_values" in inputs:
+            inputs["pixel_values"] = inputs["pixel_values"].to(dtype)
+        if dev == "cuda":
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        with torch.no_grad():
+            out = model.generate(**inputs, max_new_tokens=a.max_new_tokens, do_sample=False)
+        if dev == "cuda":
+            torch.cuda.synchronize()
+        dt = time.perf_counter() - t0
+        return proc.batch_decode(out[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True), dt
+
+    def generate_safe(items):
+        """Like generate(), but splits the batch in half on CUDA OOM. Returns [(text, amortised s, batch_n)]."""
+        try:
+            texts, dt = generate(items)
+            return [(t, dt / len(items), len(items)) for t in texts]
+        except torch.cuda.OutOfMemoryError:
+            if len(items) == 1:
+                raise
+            torch.cuda.empty_cache()
+            h = len(items) // 2
+            print(f"OOM at batch {len(items)}: retrying as {h} + {len(items) - h}", flush=True)
+            return generate_safe(items[:h]) + generate_safe(items[h:])
+
+    todo_items = list(todo.iterrows())
+    bs = max(1, a.batch_size)
+    t_start = time.perf_counter()
+    with open(pred_path, "a" if a.resume else "w", encoding="utf-8") as fo:
+        for b0 in range(0, len(todo_items), bs):
+            batch = todo_items[b0:b0 + bs]
+            for (k, r), (text, dt, bn) in zip(batch, generate_safe(batch)):
+                pr = parse_model_output(text)
+                p = pr.parsed if pr.json_ok else {}
+                finds = [f for f in (p.get("findings") or []) if isinstance(f, dict)] if isinstance(p.get("findings"), list) else []
+                boxes = [f["region_xyxy_normalized"] for f in finds
+                         if isinstance(f.get("region_xyxy_normalized"), list) and len(f["region_xyxy_normalized"]) == 4
+                         and all(isinstance(v, (int, float)) for v in f["region_xyxy_normalized"])]
+                row = dict(image_id=r.image_id, group_id=r.group_id, category=r.category,
+                           gt_anomaly=r.label == "anomaly", gt_types=list(r.defect_types), gt_boxes=list(r.boxes),
+                           json_ok=pr.json_ok, schema_ok=pr.schema_ok,
+                           pred_status=p.get("inspection_status") if pr.json_ok else None,
+                           pred_types=[f.get("type") for f in finds], pred_boxes=boxes,
+                           errors=pr.errors[:3], raw=text[:1000], latency_s=dt, batch_n=bn)
+                rows.append(row)
+                fo.write(json.dumps(row) + "\n")
             fo.flush()
-            os.fsync(fo.fileno())   # checkpoint per image: survives a runtime reset when out_dir is on Drive
-            if n % 10 == 0:
-                print(f"[{len(rows)}/{len(sample)}] json={pr.json_ok} schema={pr.schema_ok} status={row['pred_status']} {dt:.2f}s", flush=True)
+            os.fsync(fo.fileno())   # checkpoint per batch: survives a runtime reset when out_dir is on Drive
+            done_now = b0 + len(batch)
+            rate = done_now / (time.perf_counter() - t_start)
+            print(f"[{len(rows)}/{len(sample)}] {rate:.2f} img/s, ~{(len(sample) - len(rows)) / rate / 60:.0f} min left | "
+                  f"last: json={pr.json_ok} schema={pr.schema_ok} status={row['pred_status']}", flush=True)
 
     if len(rows) < len(sample):
         print(f"PARTIAL: {len(rows)}/{len(sample)} predicted. Re-run the same command with --resume to continue.", flush=True)
         sys.exit(0)
     order = {iid: i for i, iid in enumerate(sample.image_id)}
     rows.sort(key=lambda x: order[x["image_id"]])
-    lat = [x["latency_s"] for x in rows]
+    batched = any(x.get("batch_n", 1) > 1 for x in rows)
+    throughput = len(rows) / sum(x["latency_s"] for x in rows)
+    peak_batched = torch.cuda.max_memory_allocated() / 1e9 if dev == "cuda" else None
+    if batched:
+        # Amortised batch time is not per-request latency: time a fixed subset one image at a time instead.
+        lat_items = list(sample.iloc[:max(1, a.latency_samples)].iterrows())
+        if dev == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+        generate(lat_items[:1])   # warm-up
+        lat = [generate([it])[1] for it in lat_items]
+        print(f"latency re-measured unbatched on {len(lat)} images", flush=True)
+    else:
+        lat = [x["latency_s"] for x in rows]
 
     m = report_metrics(rows)
     for key in ["false_reassurance_rate", "unsupported_finding_rate_on_normals", "schema_valid_rate"]:
@@ -157,7 +201,9 @@ def main():
     per_cat = {c: report_metrics([x for x in rows if x["category"] == c]) for c in sorted({x["category"] for x in rows})}
     m.update(model=a.model, adapter=a.adapter, split=a.split, corrupt=a.corrupt, severity=a.severity if a.corrupt else None,
              longest_edge=a.longest_edge, latency_p50_s=float(np.percentile(lat, 50)),
-             latency_p95_s=float(np.percentile(lat, 95)),
+             latency_p95_s=float(np.percentile(lat, 95)), latency_n=len(lat),
+             latency_mode="unbatched_subset" if batched else "per_image", eval_batch_size=a.batch_size,
+             throughput_img_per_s=throughput, peak_gpu_mem_gb_batched=peak_batched if batched else None,
              gpu=torch.cuda.get_device_name(0) if dev == "cuda" else "cpu",
              peak_gpu_mem_gb=torch.cuda.max_memory_allocated() / 1e9 if dev == "cuda" else None,
              per_category=per_cat)
