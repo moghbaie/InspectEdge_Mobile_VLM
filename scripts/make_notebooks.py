@@ -287,8 +287,59 @@ meta = json.load(open(f'{CKPT}/{RUN}/run_meta.json'))
 import matplotlib.pyplot as plt; plt.plot(meta['losses']); plt.title(f'{RUN} train loss'); plt.show()
 print(meta['gpu'], round(meta['train_seconds']/60,1), 'min')
 """),
-        md("## 4. Full-val evaluation of the fine-tuned adapter"),
-        code("!python scripts/eval_vlm.py --model {MODEL} --adapter {CKPT}/{RUN}/final --split val --per-cell 0 --tag {RUN} 2>&1 | grep -vE 'Warning|warn' | tail -22"),
+        md("""
+## 4. Full-val evaluation of the fine-tuned adapter (resumable)
+Each prediction is appended to `{DRIVE}/reports/vlm_eval/<tag>_val_predictions.jsonl` and fsynced, so a crash or disconnect loses at most one batch.
+After a disconnect: re-run section 0 + the GPU / HF / settings cells (5, 7, 8), then this cell; it continues where it stopped.
+`EVAL_CHUNK` images are predicted per call; the cell loops over chunks (each a fresh process, so leaked memory is freed) and writes `<tag>_val_metrics.json` once every val image is done.
+Generation is batched (`EVAL_BS`); latency p50/p95 is then re-measured one image at a time on 30 val images, so it stays comparable with the batch-1 SmolVLM rows (`throughput_img_per_s` is the batched rate).
+"""),
+        code("""
+EVAL_DIR = f'{DRIVE}/reports/vlm_eval'   # on Drive: survives runtime resets
+EVAL_CHUNK = 300                           # images per subprocess; lower it if a chunk still dies
+EVAL_BS = 16 if mem_gb > 60 else 8 if mem_gb > 30 else 4   # batched generate; auto-halves on OOM
+
+def resumable_eval(tag, model_args, bs=EVAL_BS):
+    pred, metrics = f'{EVAL_DIR}/{tag}_val_predictions.jsonl', f'{EVAL_DIR}/{tag}_val_metrics.json'
+    n_done = lambda: sum(1 for _ in open(pred)) if os.path.exists(pred) else 0
+    stalls = 0
+    while stalls < 2:   # stop if two chunks in a row add no predictions (a real error: read the log above)
+        if os.path.exists(metrics) and os.path.exists(pred) and os.path.getmtime(metrics) >= os.path.getmtime(pred):
+            break
+        before = n_done()
+        !python scripts/eval_vlm.py {model_args} --split val --per-cell 0 --tag {tag} \\
+            --resume --out-dir {EVAL_DIR} --max-items {EVAL_CHUNK} --batch-size {bs} 2>&1 | grep --line-buffered -vE 'Warning|warn' | tail -25
+        stalls = stalls + 1 if n_done() == before else 0
+    assert os.path.exists(metrics), f'{tag}: eval not finished, re-run this cell'
+    !mkdir -p reports/vlm_eval && cp {metrics} {pred} reports/vlm_eval/   # local copy for section 5
+    m = json.load(open(metrics))
+    print(json.dumps({k: v for k, v in m.items() if k != 'per_category'}, indent=2))
+    return m
+
+m_bf16 = resumable_eval(RUN, f'--model {MODEL} --adapter {CKPT}/{RUN}/final')
+"""),
+        md("""
+## 4b. 4-bit accuracy check: merge the LoRA, quantize to NF4, re-run full val
+Execution plan Step 9: the quantized model must stay within **2 pp** of the bf16 model on val before any device work.
+The adapter is merged into the base weights first (`{CKPT}/<run>/merged`, ~11 GB bf16 on Drive, written once), then loaded in 4-bit NF4 (bitsandbytes).
+This measures the accuracy cost of 4-bit weights; it is not the phone format (LiteRT-LM / GGUF conversion is chosen in Step 9) and it is not faster on an A100.
+"""),
+        code("""
+MERGED = f'{CKPT}/{RUN}/merged'
+!python scripts/merge_lora.py --model {MODEL} --adapter {CKPT}/{RUN}/final --out {MERGED} 2>&1 | grep -vE 'Warning|warn' | tail -5
+m_nf4 = resumable_eval(f'{RUN}_merged_nf4', f'--model {MERGED} --load-4bit')
+
+ACC = ['schema_valid_rate', 'status_acc_strict', 'anomaly_balanced_acc', 'anomaly_recall_flagged', 'false_reassurance_rate',
+       'unsupported_finding_rate_on_normals', 'defect_type_macro_f1', 'region_iou>=0.3_rate']
+import pandas as pd
+q = pd.DataFrame({'bf16 + adapter': {k: m_bf16.get(k) for k in ACC + ['peak_gpu_mem_gb', 'throughput_img_per_s']},
+                  'merged NF4':     {k: m_nf4.get(k)  for k in ACC + ['peak_gpu_mem_gb', 'throughput_img_per_s']}})
+q['delta_pp'] = (q['merged NF4'] - q['bf16 + adapter']) * 100
+q.loc[['peak_gpu_mem_gb', 'throughput_img_per_s'], 'delta_pp'] = None
+worst = q.loc[ACC, 'delta_pp'].abs().max()
+print(f'largest accuracy change: {worst:.1f} pp ->', 'PASS (<= 2 pp)' if worst <= 2 else 'FAIL (> 2 pp): try 8-bit or keep bf16 weights for the sensitive layers')
+q.round(3)
+"""),
         md("## 5. Val comparison with the SmolVLM runs (metrics from this session + those synced to Drive by notebook 04)"),
         code("""
 import glob, pandas as pd
