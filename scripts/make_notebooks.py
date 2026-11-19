@@ -310,7 +310,7 @@ def resumable_eval(tag, model_args, bs=EVAL_BS):
         !python scripts/eval_vlm.py {model_args} --split val --per-cell 0 --tag {tag} \\
             --resume --out-dir {EVAL_DIR} --max-items {EVAL_CHUNK} --batch-size {bs} 2>&1 | grep --line-buffered -vE 'Warning|warn' | tail -25
         stalls = stalls + 1 if n_done() == before else 0
-    assert os.path.exists(metrics), f'{tag}: eval not finished, re-run this cell'
+    assert os.path.exists(metrics), f'{tag}: two chunks in a row added no predictions -- eval_vlm.py is crashing, see the traceback above (re-running will not help)'
     !mkdir -p reports/vlm_eval && cp {metrics} {pred} reports/vlm_eval/   # local copy for section 5
     m = json.load(open(metrics))
     print(json.dumps({k: v for k, v in m.items() if k != 'per_category'}, indent=2))

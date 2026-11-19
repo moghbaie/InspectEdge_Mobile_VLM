@@ -99,8 +99,15 @@ def main():
         proc.image_processor.size = {"longest_edge": a.longest_edge}
     kw = {"dtype": dtype}
     if a.load_4bit:
+        # Gemma 3n's AltUp clamps correction_coefs.weight in place during forward (and prediction_coefs
+        # in train mode); bnb would store those tiny Linears as uint8 and the clamp crashes
+        # ("result type Float can't be cast to ... unsigned char"). Keep them, the router and lm_head
+        # in bf16 -- a few KB, no effect on the 4-bit size. Passing a list replaces bnb's default
+        # skip list, hence lm_head is restated.
+        skip = ["lm_head", "correction_coefs", "prediction_coefs", "modality_router"]
         kw["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
-                                                       bnb_4bit_compute_dtype=dtype)
+                                                       bnb_4bit_compute_dtype=dtype,
+                                                       llm_int8_skip_modules=skip)
         kw["device_map"] = "auto"
     model = AutoModelForImageTextToText.from_pretrained(a.model, **kw)
     if not a.load_4bit:
