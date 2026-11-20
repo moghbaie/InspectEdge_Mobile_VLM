@@ -1,0 +1,132 @@
+[
+ {
+  "file": "pcb1_anomaly.jpg",
+  "image_id": "visa_20220922/pcb1/Data/Images/Anomaly/012.JPG",
+  "category": "pcb1",
+  "label": "anomaly",
+  "defect_types": [
+   "deformation_or_dent"
+  ],
+  "boxes": [
+   [
+    0.49786324786324704,
+    0.69626168224299,
+    0.529202279202279,
+    0.8158878504672891
+   ],
+   [
+    0.416666666666666,
+    0.6953271028037381,
+    0.45441595441595406,
+    0.814018691588785
+   ]
+  ],
+  "source_path": "data/raw/visa/pcb1/Data/Images/Anomaly/012.JPG"
+ },
+ {
+  "file": "pcb1_normal.jpg",
+  "image_id": "visa_20220922/pcb1/Data/Images/Normal/0752.JPG",
+  "category": "pcb1",
+  "label": "normal",
+  "defect_types": [],
+  "boxes": [],
+  "source_path": "data/raw/visa/pcb1/Data/Images/Normal/0752.JPG"
+ },
+ {
+  "file": "pcb4_anomaly.jpg",
+  "image_id": "visa_20220922/pcb4/Data/Images/Anomaly/006.JPG",
+  "category": "pcb4",
+  "label": "anomaly",
+  "defect_types": [
+   "contamination_or_spot",
+   "unknown"
+  ],
+  "boxes": [
+   [
+    0.228276877761413,
+    0.33333333333333304,
+    0.369661266568483,
+    0.5471014492753621
+   ]
+  ],
+  "source_path": "data/raw/visa/pcb4/Data/Images/Anomaly/006.JPG"
+ },
+ {
+  "file": "pcb3_normal.jpg",
+  "image_id": "visa_20220922/pcb3/Data/Images/Normal/0740.JPG",
+  "category": "pcb3",
+  "label": "normal",
+  "defect_types": [],
+  "boxes": [],
+  "source_path": "data/raw/visa/pcb3/Data/Images/Normal/0740.JPG"
+ },
+ {
+  "file": "capsules_anomaly.jpg",
+  "image_id": "visa_20220922/capsules/Data/Images/Anomaly/007.JPG",
+  "category": "capsules",
+  "label": "anomaly",
+  "defect_types": [
+   "unknown"
+  ],
+  "boxes": [
+   [
+    0.545333333333333,
+    0.417,
+    0.572666666666666,
+    0.445
+   ]
+  ],
+  "source_path": "data/raw/visa/capsules/Data/Images/Anomaly/007.JPG"
+ },
+ {
+  "file": "candle_anomaly.jpg",
+  "image_id": "visa_20220922/candle/Data/Images/Anomaly/014.JPG",
+  "category": "candle",
+  "label": "anomaly",
+  "defect_types": [
+   "deformation_or_dent"
+  ],
+  "boxes": [
+   [
+    0.838785046728971,
+    0.25856164383561603,
+    0.8886292834890961,
+    0.38441780821917804
+   ]
+  ],
+  "source_path": "data/raw/visa/candle/Data/Images/Anomaly/014.JPG"
+ },
+ {
+  "file": "macaroni1_normal.jpg",
+  "image_id": "visa_20220922/macaroni1/Data/Images/Normal/0763.JPG",
+  "category": "macaroni1",
+  "label": "normal",
+  "defect_types": [],
+  "boxes": [],
+  "source_path": "data/raw/visa/macaroni1/Data/Images/Normal/0763.JPG"
+ },
+ {
+  "file": "cashew_anomaly.jpg",
+  "image_id": "visa_20220922/cashew/Data/Images/Anomaly/011.JPG",
+  "category": "cashew",
+  "label": "anomaly",
+  "defect_types": [
+   "discoloration"
+  ],
+  "boxes": [
+   [
+    0.500784929356357,
+    0.45408163265306106,
+    0.546310832025117,
+    0.522108843537414
+   ],
+   [
+    0.42935635792778604,
+    0.477891156462585,
+    0.490580847723704,
+    0.54421768707483
+   ]
+  ],
+  "source_path": "data/raw/visa/cashew/Data/Images/Anomaly/011.JPG"
+ }
+]
