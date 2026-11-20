@@ -373,6 +373,7 @@ else:
 %cd {WORK}
 !pip -q install -r requirements-colab.txt && pip -q install -e . --no-deps
 os.environ['INSPECTEDGE_ROOT'] = WORK
+import sys; sys.path.insert(0, f'{WORK}/src')   # the editable install's .pth is only read at kernel start; in-kernel imports need this
 import torch, transformers
 assert transformers.__version__ == '4.57.1', 'pinned transformers not active: Runtime -> Restart session, then Run all again'
 assert torch.cuda.is_available(), 'No GPU: Runtime -> Change runtime type -> T4 GPU'
