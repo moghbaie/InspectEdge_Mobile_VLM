@@ -360,23 +360,34 @@ df.round(3)
         SYNC,
     ],
     "06_demo_inference_colab.ipynb": [
-        md("# 06 · Try the fine-tuned SmolVLM-500M on a few images\n**Run all** (Runtime → Run all). About 3 minutes on a T4: no dataset download, the 8 demo images ship with the repo in `examples/` (val split: never trained on, never the locked test).\nGreen box = true defect region, red box = the model's predicted region. Section 3 lets you upload your own photo.\nNeeds the adapter trained in notebook 03 at `MyDrive/InspectEdge/checkpoints/<RUN>/final`."),
+        md("# 06 · Try the fine-tuned SmolVLM-500M on a few images\n**Run all** (Runtime → Run all). About 3 minutes on a T4: no dataset download, the 8 demo images ship with the repo in `examples/` (val split: never trained on, never the locked test).\nGreen box = true defect region, red box = the model's predicted region. Section 3 lets you upload your own photo.\nNeeds the adapter trained in notebook 03 at `MyDrive/InspectEdge/checkpoints/<RUN>/final`.\n\n**Also runs locally in VS Code** (Jupyter extension, kernel = the repo's `.venv`): download the Drive folder `InspectEdge/checkpoints/<RUN>/final` into `checkpoints/<RUN>/final` in the repo, then Run All. Uses the local GPU if there is one (fp16), else CPU (slow, ~1 min per image)."),
         code("""
-import os
-from google.colab import drive
-drive.mount('/content/drive')
-DRIVE, WORK = '/content/drive/MyDrive/InspectEdge', '/content/InspectEdge'
-if os.path.isdir(f'{WORK}/.git'):
-    !git -C {WORK} pull -q --ff-only
-else:
-    !git clone -q https://github.com/moghbaie/InspectEdge_Mobile_VLM.git {WORK}
-%cd {WORK}
-!pip -q install -r requirements-colab.txt && pip -q install -e . --no-deps
+import os, sys
+try:
+    import google.colab; COLAB = True
+except ImportError:
+    COLAB = False
+if COLAB:
+    from google.colab import drive
+    drive.mount('/content/drive')
+    DRIVE, WORK = '/content/drive/MyDrive/InspectEdge', '/content/InspectEdge'
+    if os.path.isdir(f'{WORK}/.git'):
+        !git -C {WORK} pull -q --ff-only
+    else:
+        !git clone -q https://github.com/moghbaie/InspectEdge_Mobile_VLM.git {WORK}
+    %cd {WORK}
+    !pip -q install -r requirements-colab.txt && pip -q install -e . --no-deps
+    CKPT = f'{DRIVE}/checkpoints'
+else:   # local (VS Code / Jupyter): the notebook sits in <repo>/notebooks
+    WORK = os.path.dirname(os.getcwd()) if os.path.basename(os.getcwd()) == 'notebooks' else os.getcwd()
+    os.chdir(WORK)
+    CKPT = f'{WORK}/checkpoints'
 os.environ['INSPECTEDGE_ROOT'] = WORK
-import sys; sys.path.insert(0, f'{WORK}/src')   # the editable install's .pth is only read at kernel start; in-kernel imports need this
+sys.path.insert(0, f'{WORK}/src')   # an editable install's .pth is only read at kernel start; in-kernel imports need this
 import torch, transformers
-assert transformers.__version__ == '4.57.1', 'pinned transformers not active: Runtime -> Restart session, then Run all again'
-assert torch.cuda.is_available(), 'No GPU: Runtime -> Change runtime type -> T4 GPU'
+assert transformers.__version__ == '4.57.1', 'pinned transformers not active: restart the kernel/session, then Run all again'
+DEV = 'cuda' if torch.cuda.is_available() else 'cpu'
+print('running on', torch.cuda.get_device_name(0) if DEV == 'cuda' else 'CPU (slow: about a minute per image)')
 """),
         md("## 1. Load the model"),
         code("""
@@ -390,13 +401,14 @@ from peft import PeftModel
 from inspectedge.vlm.prompting import build_messages
 from inspectedge.schemas.report import parse_model_output
 
-ADAPTER, LONGEST_EDGE = f'{DRIVE}/checkpoints/{RUN}/final', 1024   # same image size as eval_vlm.py
-assert os.path.isdir(ADAPTER), f'no adapter at {ADAPTER}: train it in notebook 03 first'
-dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+ADAPTER, LONGEST_EDGE = f'{CKPT}/{RUN}/final', 1024   # same image size as eval_vlm.py
+assert os.path.isdir(ADAPTER), (f'no adapter at {ADAPTER}: ' + ('train it in notebook 03 first' if COLAB else
+    f'download the Drive folder InspectEdge/checkpoints/{RUN}/final to this path'))
+dtype = (torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16) if DEV == 'cuda' else torch.float32
 proc = AutoProcessor.from_pretrained(ADAPTER)
 if 'longest_edge' in getattr(proc.image_processor, 'size', {}):
     proc.image_processor.size = {'longest_edge': LONGEST_EDGE}
-model = AutoModelForImageTextToText.from_pretrained(BASE, dtype=dtype).to('cuda')
+model = AutoModelForImageTextToText.from_pretrained(BASE, dtype=dtype).to(DEV)
 model = PeftModel.from_pretrained(model, ADAPTER).merge_and_unload().eval()   # merged: faster generation
 
 def inspect(img, category):
@@ -404,10 +416,11 @@ def inspect(img, category):
     prompt = proc.apply_chat_template(build_messages(category), add_generation_prompt=True)
     inputs = proc(text=[prompt], images=[[img]], return_tensors='pt').to(model.device)
     inputs['pixel_values'] = inputs['pixel_values'].to(dtype)
-    torch.cuda.synchronize(); t0 = time.perf_counter()
+    if DEV == 'cuda': torch.cuda.synchronize()
+    t0 = time.perf_counter()
     with torch.no_grad():
         out = model.generate(**inputs, max_new_tokens=320, do_sample=False)
-    torch.cuda.synchronize()
+    if DEV == 'cuda': torch.cuda.synchronize()
     text = proc.batch_decode(out[:, inputs['input_ids'].shape[1]:], skip_special_tokens=True)[0]
     return parse_model_output(text), text, time.perf_counter() - t0
 
@@ -456,12 +469,17 @@ for fam in ['low_light', 'motion_blur']:
     print(f'===== {fam} =====')
     show(Image.fromarray(corrupt(arr, fam, 3, seed=0)[0]), e['category'], e)
 """),
-        md("## 3. Your own photo\nSet `CATEGORY` to the closest of: candle, capsules, cashew, chewinggum, fryum, macaroni1, macaroni2, pcb1, pcb2, pcb3, pcb4, pipe_fryum. The model only knows these 12 VisA objects photographed on a rig, so phone photos of other things are out of its training range."),
+        md("## 3. Your own photo\nSet `CATEGORY` to the closest of: candle, capsules, cashew, chewinggum, fryum, macaroni1, macaroni2, pcb1, pcb2, pcb3, pcb4, pipe_fryum. The model only knows these 12 VisA objects photographed on a rig, so phone photos of other things are out of its training range.\nIn Colab an upload button appears; locally, list the file paths in `MY_PHOTOS`."),
         code("""
-from google.colab import files
 CATEGORY = 'pcb1'
-for name, data in files.upload().items():
-    img = Image.open(io.BytesIO(data)).convert('RGB'); img.thumbnail((LONGEST_EDGE, LONGEST_EDGE))
+MY_PHOTOS = []   # local only, e.g. [r'C:\\Users\\me\\Pictures\\board.jpg']
+if COLAB:
+    from google.colab import files
+    photos = [io.BytesIO(data) for data in files.upload().values()]
+else:
+    photos = MY_PHOTOS
+for src in photos:
+    img = Image.open(src).convert('RGB'); img.thumbnail((LONGEST_EDGE, LONGEST_EDGE))
     show(img, CATEGORY)
 """),
     ],
